@@ -1,0 +1,1 @@
+https://www.spacecowboys-games.com/universe/splendor/
