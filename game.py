@@ -319,16 +319,27 @@ def next_turn(game: GameState, action_msg: str = "") -> str:
     """Move to next player's turn."""
     # Check token limit
     player = game.players[game.current_player]
-    while player.get_token_count() > 10:
-        # This would need UI interaction - for now, just note it
-        game.message = f"{player.name} has too many tokens! Must return some."
-        break
+    discarded = []
     
+    while player.get_token_count() > 10:
+        # Auto-discard for POC to avoid blocking
+        available = [color for color, count in player.tokens.items() if count > 0]
+        if available:
+            to_discard = random.choice(available)
+            player.tokens[to_discard] -= 1
+            game.bank[to_discard] = game.bank.get(to_discard, 0) + 1
+            discarded.append(to_discard.value)
+        else:
+            break
+            
     # Next player
     game.current_player = (game.current_player + 1) % len(game.players)
     
-    if action_msg:
-        game.message = action_msg + f" {game.players[game.current_player].name}'s turn."
+    msg = action_msg
+    if discarded:
+        msg += f" (Auto-discarded: {', '.join(discarded)})"
+        
+    game.message = msg + f" {game.players[game.current_player].name}'s turn."
     
     return game.message
 

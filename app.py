@@ -10,7 +10,7 @@ import random
 from data import GemColor, GEM_COLORS
 from game import (
     GameState, Player, init_game, take_different_gems, take_same_gems,
-    reserve_card, buy_card, get_available_actions, GamePhase
+    reserve_card, buy_card, get_available_actions, GamePhase, next_turn
 )
 
 # Page config
@@ -51,9 +51,12 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ===== GLOBAL STATE =====
+@st.cache_resource
+def get_global_games():
+    return {}
+
 # ===== SESSION STATE =====
-if 'games' not in st.session_state:
-    st.session_state.games = {}
 if 'current_game_id' not in st.session_state:
     st.session_state.current_game_id = None
 
@@ -104,7 +107,7 @@ def ai_move(game):
     if len(avail)>=3:
         return take_different_gems(game, random.sample(avail,3))
     
-    return "AI passes."
+    return next_turn(game, "AI passes.")
 
 # ===== SCREENS =====
 def lobby():
@@ -115,24 +118,25 @@ def lobby():
     
     with c1:
         st.markdown("## 🎮 Create Game")
-        np = st.selectbox("Players", [2,3,4], key="np")
+        total_p = st.selectbox("Total Players", [2,3,4], index=1, key="tp") # default 3
+        ai_p = st.number_input("How many AI bots?", min_value=0, max_value=total_p, value=total_p-1, key="ai_p")
+        human_p = total_p - ai_p
         
         names = []
-        for i in range(np):
-            names.append(st.text_input(f"P{i+1}", f"Player {i+1}", key=f"pn{i}"))
-        
-        ai_on = st.checkbox("Add AI Bots", value=True)
-        ai_cnt = 0
-        if ai_on:
-            ai_cnt = st.slider("AI Bots", 1, 4-np, max(1, 4-np), key="aic")
+        for i in range(human_p):
+            names.append(st.text_input(f"Human {i+1}", f"Player {i+1}", key=f"hn{i}"))
         
         if st.button("✨ Create", use_container_width=True):
-            final = names + [f"AI Bot {i+1}" for i in range(ai_cnt)]
+            final = names + [f"AI Bot {i+1}" for i in range(ai_p)]
             if all(final):
                 gid = str(uuid.uuid4())[:8]
                 g = init_game(final)
-                g.phase = GamePhase.WAITING
-                st.session_state.games[gid] = g
+                # Auto-start if it's just 1 human vs bots
+                if human_p <= 1:
+                    g.phase = GamePhase.PLAY
+                else:
+                    g.phase = GamePhase.WAITING
+                get_global_games()[gid] = g
                 st.session_state.current_game_id = gid
                 st.rerun()
     
@@ -140,20 +144,20 @@ def lobby():
         st.markdown("## 🔗 Join")
         jid = st.text_input("Game ID", key="jid")
         if st.button("Join", use_container_width=True):
-            if jid in st.session_state.games:
+            if jid in get_global_games():
                 st.session_state.current_game_id = jid
                 st.rerun()
             else:
                 st.error("Game not found!")
         
-        if st.session_state.games:
+        if get_global_games():
             st.markdown("### Active")
-            for gid,g in st.session_state.games.items():
+            for gid,g in get_global_games().items():
                 s = "Waiting" if g.phase==GamePhase.WAITING else "Playing" if g.phase==GamePhase.PLAY else "Done"
                 st.markdown(f"**{gid}** - {s} ({len(g.players)}p)")
 
 def waiting(gid):
-    g = st.session_state.games[gid]
+    g = get_global_games()[gid]
     
     st.markdown("# 💎 Splendor Online")
     st.markdown(f"### 📋 Waiting Room - ID: `{gid}`")
@@ -172,7 +176,7 @@ def waiting(gid):
             st.rerun()
     with c2:
         if st.button("❌ Cancel", use_container_width=True):
-            del st.session_state.games[gid]
+            del get_global_games()[gid]
             st.session_state.current_game_id = None
             st.rerun()
     
@@ -189,7 +193,7 @@ def waiting(gid):
         for n in g.nobles: st.markdown(noble(n), unsafe_allow_html=True)
 
 def game_ui(gid):
-    g = st.session_state.games[gid]
+    g = get_global_games()[gid]
     
     # AI move
     cp = g.players[g.current_player]
@@ -211,14 +215,13 @@ def game_ui(gid):
     if g.phase == GamePhase.GAME_OVER:
         st.markdown(f"## 🏆 {g.winner} WINS!")
         if st.button("🔄 Again"):
-            del st.session_state.games[gid]
+            del get_global_games()[gid]
             st.session_state.current_game_id = None
             st.rerun()
         return
     
     # Turn
     st.markdown(f'<div class="turn-box">🎯 {cp.name}\'s Turn</div>', unsafe_allow_html=True)
-    st.markdown('<meta http-equiv="refresh" content="5">', unsafe_allow_html=True)
     
     # Layout
     cl, cc, cr = st.columns([1,2,1])
@@ -317,8 +320,8 @@ def game_ui(gid):
 def main():
     gid = st.session_state.current_game_id
     
-    if gid and gid in st.session_state.games:
-        g = st.session_state.games[gid]
+    if gid and gid in get_global_games():
+        g = get_global_games()[gid]
         if g.phase == GamePhase.WAITING:
             waiting(gid)
         else:
